@@ -45,10 +45,10 @@ def leer_properties():
 
             
             rutaPadreOneDrive = config.get('ONEDRIVE', 'rutapadreonedrive')
-            ruta_relativa = "Facturas Stop & Go"
+            ruta_relativa = "Facturas Stop and Go"
             
             rutaPadreOneDrive = obtener_ruta_onedrive(ruta_relativa)
-            #rutaPadreOneDrive = r'C:\Users\david.casal\OneDrive - GASOLINAS, LUBRIFIC. Y REPUESTOS, S.A. (GALURESA) (1)\Facturas Stop & Go'
+            #rutaPadreOneDrive = r'C:\Users\david.casal\OneDrive - GASOLINAS, LUBRIFIC. Y REPUESTOS, S.A. (GALURESA) (1)\Facturas Stop and Go'
             ruta_log = os.path.join(rutaPadreOneDrive, "Log")
 
             configurar_logging(ruta_log)
