@@ -121,6 +121,45 @@ class FacturasStopAndGo:
 
         return s
 
+    def _parse_fecha(self, raw):
+        if raw is None:
+            return None
+
+        try:
+            if isinstance(raw, pd.Timestamp):
+                if pd.isna(raw):
+                    return None
+                return raw.date()
+            if isinstance(raw, datetime):
+                return raw.date()
+            if isinstance(raw, date):
+                return raw
+        except Exception:
+            pass
+
+        s = self._norm_fecha(raw)
+        if s == "":
+            return None
+
+        try:
+            return datetime.strptime(s, "%d/%m/%Y").date()
+        except Exception:
+            return None
+
+    def _fecha_actual_si_supera_5_dias(self, raw, dias=5):
+        fecha_original = self._norm_fecha(raw)
+        fecha_dt = self._parse_fecha(raw)
+
+        if fecha_dt is None:
+            return fecha_original
+
+        hoy = date.today()
+
+        if (hoy - fecha_dt).days > dias:
+            return hoy.strftime("%d/%m/%Y")
+
+        return fecha_original
+
     def _resolver_salida_dir(self):
         cand1 = os.path.join(self.ruta, "Contabilidad")
         cand2 = os.path.join(self.ruta, "Contabilidad Mes Actual")
@@ -195,7 +234,7 @@ class FacturasStopAndGo:
         return excels[0]
 
     # ============================================================
-    # MAPEADO DE COLUMNAS (CLAVE PARA TU EXCEL)
+    # MAPEADO DE COLUMNAS
     # ============================================================
     def _normalizar_columnas_stopgo(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -207,13 +246,6 @@ class FacturasStopAndGo:
         rename_map = {
             "Fecha": "FechaFactura",
             "Base": "BaseImponible",
-            # el resto coinciden ya:
-            # "Nfactura": "Nfactura",
-            # "Vencimiento": "Vencimiento",
-            # "Estacion": "Estacion",
-            # "Iva": "Iva",
-            # "TotalFactura": "TotalFactura",
-            # "Concepto": "Concepto"
         }
 
         df = df.copy()
@@ -250,7 +282,6 @@ class FacturasStopAndGo:
             pf = pd.read_excel(excel_facturas, dtype=str, engine="openpyxl").fillna("")
             pf.columns = pf.columns.str.strip()
 
-            # ✅ Normalizamos columnas según tu Excel
             pf = self._normalizar_columnas_stopgo(pf)
 
             print(f"✅ Filas leídas del Excel: {len(pf)}")
@@ -264,18 +295,15 @@ class FacturasStopAndGo:
                 logging.error(msg)
                 return
 
-            # ================== CONSTANTES según tus CSV ==================
             proveedor_nombre = "REPSOL CIAL. P.P., S.A"
             proveedor_cuenta = "41000001"
             proveedor_cif = "A80298839"
             cuenta_iva_21 = "47200021"
             cuenta_banco = "57200052"
-            # =============================================================
 
             lista_extra = []
             facturas_unicas_iva = {}
 
-            # Contadores
             omitidas_vacias = 0
             sin_vencimiento = 0
             con_pago = 0
@@ -289,7 +317,8 @@ class FacturasStopAndGo:
                 estacion = self._clean_codigo(factura.get("Estacion", ""))
                 numFactura = self._clean_codigo(factura.get("Nfactura", ""))
 
-                fecha_emision = self._norm_fecha(factura.get("FechaFactura", ""))
+                fecha_factura_raw = factura.get("FechaFactura", "")
+                fecha_emision = self._fecha_actual_si_supera_5_dias(fecha_factura_raw, dias=5)
                 fecha_vencimiento = self._norm_fecha(factura.get("Vencimiento", ""))
 
                 base = self._norm_float(factura.get("BaseImponible", ""))
@@ -315,7 +344,6 @@ class FacturasStopAndGo:
                 total_str_pos = self._norm(total)
                 total_str_neg = self._norm(total, forzar_negativo=True)
 
-                # ✅ FACTURA (orden igual a tu EXTRA)
                 contador_asiento += 1
                 desc_factura = f"Fra. {numFactura}, {proveedor_nombre}".strip()
 
@@ -349,7 +377,6 @@ class FacturasStopAndGo:
                 facturas_unicas_iva[numFactura] = factura
                 facturas_validas += 1
 
-                # ✅ PAGO (orden igual a tu EXTRA)
                 if fecha_vencimiento != "":
                     contador_asiento += 1
                     desc_pago = f"PAGO FRA. REPSOL {numFactura}".strip()
@@ -387,10 +414,8 @@ class FacturasStopAndGo:
             pd.DataFrame(lista_extra).to_csv(out_extra, index=False, header=False, sep=";")
             print(f"✅ EXTRA01.csv generado. Líneas: {len(lista_extra)}")
 
-            # IVA
             self._generar_iva(facturas_unicas_iva, proveedor_nombre, proveedor_cif, proveedor_cuenta)
 
-            # Resumen
             print("\n------------------ RESUMEN STOP&GO ------------------")
             print(f"✅ Facturas válidas procesadas: {facturas_validas}")
             print(f"💳 Facturas con pago: {con_pago}")
@@ -423,7 +448,10 @@ class FacturasStopAndGo:
 
             for factura in facturas_unicas.values():
                 numFactura = self._clean_codigo(factura.get("Nfactura", ""))
-                fecha = self._norm_fecha(factura.get("FechaFactura", factura.get("Fecha", "")))
+
+                fecha_raw = factura.get("FechaFactura", factura.get("Fecha", ""))
+                fecha = self._norm_fecha(fecha_raw)  # columna K: fecha factura original
+                fecha_s_x = self._fecha_actual_si_supera_5_dias(fecha_raw, dias=5)  # columnas S y X
 
                 base = self._norm_float(factura.get("BaseImponible", factura.get("Base", "")))
                 iva = self._norm_float(factura.get("Iva", ""))
@@ -446,7 +474,7 @@ class FacturasStopAndGo:
                     "47200021", "S", fecha, "",
                     "21", "0",
                     total_str, iva_str, "0", "283",
-                    fecha, "0", "1", "0", "", fecha, "0"
+                    fecha_s_x, "0", "1", "0", "", fecha_s_x, "0"
                 ])
 
             if not lista_iva:
